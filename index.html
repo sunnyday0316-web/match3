@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>시니어 카드 짝 맞추기 게임</title>
+    <!-- 화면을 쉽게 꾸미기 위해 Tailwind CSS(미리 만들어진 디자인 코드 모음)를 불러옵니다. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 카드가 뒤집히는 3D 효과를 주기 위한 사용자 지정 CSS(디자인 코드)입니다. */
+        .card-container {
+            perspective: 1000px;
+            cursor: pointer;
+        }
+        .card-inner {
+            width: 100%;
+            height: 100%;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+            position: relative;
+        }
+        /* 카드가 'flipped' 상태가 되면 180도 회전합니다. */
+        .card-container.flipped .card-inner {
+            transform: rotateY(180deg);
+        }
+        .card-front, .card-back {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        /* 카드 뒷면(처음 보이는 면) */
+        .card-back {
+            background-color: #4ade80; /* 부드러운 초록색 */
+            border: 4px solid #16a34a;
+        }
+        .card-back::after {
+            content: '?';
+            /* clamp 함수: 글자 크기를 (최솟값, 권장값, 최댓값)으로 설정하여 화면 크기에 따라 반응하도록 합니다. */
+            font-size: clamp(1.5rem, 8vw, 3rem); 
+            color: white;
+            font-weight: bold;
+        }
+        /* 카드 앞면(그림이 있는 면, 180도 돌아가 있음) */
+        .card-front {
+            background-color: white;
+            transform: rotateY(180deg);
+            /* 모바일에서는 작게, PC에서는 크게 화면에 맞추어 그림 크기가 조절됩니다. */
+            font-size: clamp(2rem, 10vw, 4rem); 
+            border: 4px solid #facc15;
+        }
+        
+        /* 폭죽 효과를 보여줄 캔버스(그림판) 설정입니다. */
+        #fireworks-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body class="bg-blue-50 flex flex-col items-center min-h-screen p-2 sm:p-4 font-sans text-gray-800">
+
+    <div class="max-w-2xl w-full text-center mt-4 sm:mt-8">
+        <h1 class="text-3xl sm:text-4xl font-bold text-blue-800 mb-4 sm:mb-8">카드 짝 맞추기 게임</h1>
+
+        <!-- 게임 설정 화면 (시작 전) -->
+        <div id="setup-screen" class="bg-white p-6 sm:p-8 rounded-2xl shadow-lg">
+            <p class="text-xl sm:text-2xl mb-4 sm:mb-6 font-medium">원하시는 짝의 개수를 선택해주세요.</p>
+            <div class="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-4 mb-6 sm:mb-8">
+                <label for="pair-count" class="text-lg sm:text-xl">맞출 짝 개수:</label>
+                <select id="pair-count" class="text-xl sm:text-2xl p-2 border-2 border-blue-400 rounded-lg focus:outline-none">
+                    <option value="4">4쌍 (총 8장)</option>
+                    <option value="6" selected>6쌍 (총 12장)</option>
+                    <option value="8">8쌍 (총 16장)</option>
+                </select>
+            </div>
+            <button id="start-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-xl sm:text-2xl font-bold py-3 px-8 sm:py-4 sm:px-10 rounded-xl transition-colors shadow-md">
+                시작하기
+            </button>
+        </div>
+
+        <!-- 게임 진행 화면 -->
+        <div id="game-screen" class="hidden w-full">
+            <div class="flex justify-between items-center mb-4 px-2 sm:px-0">
+                <p class="text-lg sm:text-xl font-bold">찾은 짝: <span id="score" class="text-blue-600">0</span> / <span id="total-score">0</span></p>
+                <button id="restart-btn" class="bg-gray-500 hover:bg-gray-600 text-white text-sm sm:text-lg font-bold py-2 px-3 sm:px-4 rounded-lg">
+                    처음부터 다시
+                </button>
+            </div>
+            
+            <!-- 카드가 놓일 공간입니다. 화면 크기에 따라 자동으로 배열됩니다. -->
+            <div id="game-board" class="mt-4 auto-rows-fr">
+                <!-- JavaScript를 통해 여기에 카드가 생성됩니다. -->
+            </div>
+        </div>
+
+        <!-- 게임 종료 메시지 화면 -->
+        <div id="game-over-message" class="hidden fixed inset-0 bg-black bg-opacity-60 flex flex-col items-center justify-center z-40 p-4">
+            <div class="bg-white p-8 sm:p-10 rounded-3xl shadow-2xl text-center transform transition-all scale-110 max-w-sm sm:max-w-md w-full">
+                <h2 class="text-4xl sm:text-5xl font-extrabold text-red-500 mb-4">게임 종료!</h2>
+                <p class="text-xl sm:text-3xl mb-8">모든 짝을 다 맞추셨습니다!<br>대단하십니다!</p>
+                <button id="play-again-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-xl sm:text-2xl font-bold py-3 px-8 sm:py-4 sm:px-10 rounded-xl shadow-md w-full sm:w-auto">
+                    다시하기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 폭죽을 그릴 캔버스 -->
+    <canvas id="fireworks-canvas" class="hidden"></canvas>
+
+    <script>
+        // 어르신들이 쉽게 알아볼 수 있는 뚜렷한 이모티콘 목록입니다.
+        const allIcons = ['🍎', '🐶', '🚗', '🌻', '⚽', '⏰', '🏠', '☕', '🦋', '🍉', '🚲', '🎁'];
+        
+        // 게임 상태를 저장하는 변수들입니다.
+        let cards = [];
+        let flippedCards = [];
+        let matchedPairs = 0;
+        let totalPairs = 0;
+        let isLocked = false; // 카드가 뒤집히는 동안 다른 카드를 클릭하지 못하게 막는 역할
+        let animationId; // 폭죽 애니메이션(화면의 움직임)을 제어하기 위한 변수입니다.
+
+        // 화면의 요소(버튼, 글자 등)를 가져옵니다.
+        const setupScreen = document.getElementById('setup-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const gameBoard = document.getElementById('game-board');
+        const scoreDisplay = document.getElementById('score');
+        const totalScoreDisplay = document.getElementById('total-score');
+        const gameOverMessage = document.getElementById('game-over-message');
+        const fireworksCanvas = document.getElementById('fireworks-canvas');
+
+        // 오디오 관련 변수 (소리 재생을 위해 필요합니다)
+        let audioCtx;
+
+        // 시작 버튼 클릭 이벤트
+        document.getElementById('start-btn').addEventListener('click', () => {
+            // 브라우저 정책상 사용자가 버튼을 눌렀을 때 오디오 시스템을 시작해야 합니다.
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            startGame();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', showSetup);
+        
+        // 다시하기 버튼 클릭 시 설정 화면을 거치지 않고 바로 게임을 다시 시작하도록 수정합니다.
+        document.getElementById('play-again-btn').addEventListener('click', () => {
+            gameOverMessage.classList.add('hidden');
+            fireworksCanvas.classList.add('hidden');
+            if (animationId) cancelAnimationFrame(animationId); // 진행 중인 폭죽 효과를 완전히 멈춥니다.
+            startGame(); // 바로 다시 시작합니다.
+        });
+
+        // 처음 설정 화면으로 돌아가는 함수입니다.
+        function showSetup() {
+            gameScreen.classList.add('hidden');
+            gameOverMessage.classList.add('hidden');
+            fireworksCanvas.classList.add('hidden');
+            if (animationId) cancelAnimationFrame(animationId); // 진행 중인 폭죽 효과를 완전히 멈춥니다.
+            setupScreen.classList.remove('hidden');
+            gameBoard.innerHTML = '';
+            matchedPairs = 0;
+            scoreDisplay.textContent = '0';
+        }
+
+        // 게임을 시작하는 함수입니다.
+        function startGame() {
+            // 사용자가 선택한 짝의 개수를 가져옵니다.
+            const selectElement = document.getElementById('pair-count');
+            totalPairs = parseInt(selectElement.value);
+            totalScoreDisplay.textContent = totalPairs;
+            matchedPairs = 0;
+            scoreDisplay.textContent = '0';
+            flippedCards = [];
+            isLocked = false;
+
+            // 화면 전환
+            setupScreen.classList.add('hidden');
+            gameOverMessage.classList.add('hidden');
+            fireworksCanvas.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+
+            // 카드 생성 및 화면에 표시
+            createBoard(totalPairs);
+        }
+
+        // 카드를 섞는 함수입니다. (배열의 순서를 무작위로 바꿉니다)
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        // 게임판을 만드는 함수입니다.
+        function createBoard(pairs) {
+            gameBoard.innerHTML = ''; // 기존 카드를 지웁니다.
+            
+            // 필요한 만큼의 이모티콘을 고르고, 각각 2개씩 복사하여 카드 배열을 만듭니다.
+            let selectedIcons = allIcons.slice(0, pairs);
+            let deck = [...selectedIcons, ...selectedIcons];
+            
+            // 카드를 무작위로 섞습니다.
+            deck = shuffle(deck);
+
+            // 카드 개수에 따라 화면 배치를 조절합니다. (반응형 적용)
+            // sm:(모바일 이상의 크기)에서는 가로 4칸을 사용하고, 모바일에서는 상황에 맞게 3칸이나 4칸을 씁니다.
+            if (pairs === 4) {
+                gameBoard.className = "grid grid-cols-4 gap-2 sm:gap-4 mt-4";
+            } else if (pairs === 6) {
+                // 12장인 경우: 좁은 화면(모바일)에서는 3칸x4줄로 안정적으로 보이고 넓은 화면에선 4칸x3줄로 보입니다.
+                gameBoard.className = "grid grid-cols-3 sm:grid-cols-4 gap-2 sm:gap-4 mt-4";
+            } else if (pairs === 8) {
+                // 16장인 경우: 간격을 최소화하여 화면에서 밀려나지 않게 설정합니다.
+                gameBoard.className = "grid grid-cols-4 gap-2 sm:gap-4 mt-4";
+            }
+
+            // 각 카드에 대한 HTML 모양을 만듭니다.
+            deck.forEach((icon, index) => {
+                const card = document.createElement('div');
+                card.classList.add('card-container');
+                // 카드의 높이를 일정하게 유지하기 위해 비율을 설정합니다.
+                card.style.aspectRatio = "3/4";
+                
+                card.innerHTML = `
+                    <div class="card-inner">
+                        <div class="card-back"></div>
+                        <div class="card-front">${icon}</div>
+                    </div>
+                `;
+                
+                // 카드에 그림 정보를 숨겨둡니다.
+                card.dataset.icon = icon;
+                card.dataset.index = index;
+                
+                // 카드를 클릭했을 때 실행될 동작을 연결합니다.
+                card.addEventListener('click', () => flipCard(card));
+                
+                gameBoard.appendChild(card);
+            });
+        }
+
+        // 카드를 뒤집는 함수입니다.
+        function flipCard(card) {
+            // 이미 뒤집혀 있거나, 다른 카드를 확인하는 중(isLocked)이면 무시합니다.
+            if (isLocked || card.classList.contains('flipped')) return;
+
+            // 카드를 누를 때 짧고 경쾌한 효과음을 재생합니다.
+            playClickSound();
+
+            // 카드를 뒤집는 시각적 효과를 줍니다.
+            card.classList.add('flipped');
+            flippedCards.push(card);
+
+            // 두 장을 뒤집었을 때 짝이 맞는지 확인합니다.
+            if (flippedCards.length === 2) {
+                checkForMatch();
+            }
+        }
+
+        // 두 카드가 같은지 확인하는 함수입니다.
+        function checkForMatch() {
+            isLocked = true; // 확인하는 동안 다른 카드를 못 누르게 막습니다.
+            const card1 = flippedCards[0];
+            const card2 = flippedCards[1];
+
+            // 두 카드의 그림(데이터)이 같은지 비교합니다.
+            if (card1.dataset.icon === card2.dataset.icon) {
+                // 일치하는 경우
+                matchedPairs++;
+                scoreDisplay.textContent = matchedPairs;
+                flippedCards = []; // 뒤집은 카드 목록을 비웁니다.
+                isLocked = false; // 다시 다른 카드를 누를 수 있게 해제합니다.
+
+                // 정답 그림은 보이도록 그대로 둡니다 (flipped 클래스 유지).
+
+                // 모든 짝을 찾았는지 확인합니다.
+                if (matchedPairs === totalPairs) {
+                    setTimeout(endGame, 500); // 0.5초 뒤에 종료 화면을 띄웁니다.
+                }
+            } else {
+                // 일치하지 않는 경우: 1초(1000밀리초) 뒤에 다시 뒤집습니다.
+                setTimeout(() => {
+                    card1.classList.remove('flipped');
+                    card2.classList.remove('flipped');
+                    flippedCards = [];
+                    isLocked = false;
+                }, 1000);
+            }
+        }
+
+        // 게임 종료 시 실행되는 함수입니다.
+        function endGame() {
+            // 게임 종료 시 먼저 폭죽 화면만 보여주고 애니메이션을 시작합니다.
+            fireworksCanvas.classList.remove('hidden');
+            startFireworks();
+
+            // setTimeout 기술을 사용하여 2초(2000밀리초) 뒤에 폭죽을 멈추고 메시지를 띄웁니다.
+            setTimeout(() => {
+                if (animationId) cancelAnimationFrame(animationId); // 화면의 폭죽 움직임을 멈춥니다.
+                fireworksCanvas.classList.add('hidden'); // 폭죽 화면을 숨깁니다.
+                gameOverMessage.classList.remove('hidden'); // 다시하기 버튼이 포함된 메시지 창을 띄웁니다.
+            }, 2000);
+        }
+
+        // 카드를 누를 때 나는 '뾱' 하는 효과음을 만드는 함수입니다. (웹 오디오 API 사용)
+        function playClickSound() {
+            if (!audioCtx) return;
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            // 어르신들 귀에 편안하도록 부드러운 소리(sine wave)를 냅니다.
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(400, audioCtx.currentTime); // 시작 음높이
+            oscillator.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1); // 끝 음높이
+            
+            // 소리가 짧게 끊어지도록 볼륨을 조절합니다.
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.1);
+        }
+
+        // 폭죽 소리를 내는 함수입니다. (웹 오디오 API 사용)
+        function playFireworkSound() {
+            if (!audioCtx) return;
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            // 폭죽 터지는 소리와 비슷하게 주파수(음높이)를 빠르게 떨어뜨립니다.
+            oscillator.type = 'triangle';
+            oscillator.frequency.setValueAtTime(300, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            
+            // 볼륨(소리 크기)도 서서히 줄어들게 합니다.
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.3);
+        }
+
+        // ===== 폭죽 시각 효과 (Canvas API) 설정 부분입니다 =====
+        const ctx = fireworksCanvas.getContext('2d');
+        let particles = [];
+
+        // 화면 크기에 맞게 캔버스 크기를 조절합니다.
+        function resizeCanvas() {
+            fireworksCanvas.width = window.innerWidth;
+            fireworksCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // 폭죽 입자 하나를 만드는 클래스입니다.
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                // 무작위 방향으로 퍼져나가도록 속도를 설정합니다.
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 6 + 2;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.alpha = 1; // 투명도 (1은 완전 불투명)
+                this.decay = Math.random() * 0.015 + 0.015; // 사라지는 속도
+            }
+            
+            // 입자의 위치를 업데이트합니다.
+            update() {
+                this.vy += 0.05; // 중력 효과 (아래로 떨어짐)
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= this.decay; // 점점 투명해집니다.
+            }
+            
+            // 입자를 화면에 그립니다.
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // 폭죽을 터뜨리는 함수입니다.
+        function createFirework(x, y) {
+            playFireworkSound(); // 소리를 재생합니다.
+            const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+            for (let i = 0; i < 50; i++) {
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        // 화면을 계속 다시 그리며 폭죽 효과를 갱신하는 함수입니다.
+        function animateFireworks() {
+            // 화면을 검은색 반투명으로 덮어 잔상 효과를 줍니다.
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, fireworksCanvas.width, fireworksCanvas.height);
+
+            // 무작위 확률로 새 폭죽을 터뜨립니다.
+            if (Math.random() < 0.05) {
+                const x = Math.random() * fireworksCanvas.width;
+                const y = Math.random() * (fireworksCanvas.height / 2); // 화면 위쪽에서 터지게 합니다.
+                createFirework(x, y);
+            }
+
+            // 모든 입자를 업데이트하고 그립니다.
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw();
+                // 완전히 투명해진 입자는 배열에서 제거합니다.
+                if (particles[i].alpha <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            animationId = requestAnimationFrame(animateFireworks);
+        }
+
+        // 폭죽 효과를 시작하는 함수입니다.
+        function startFireworks() {
+            resizeCanvas();
+            // 이전 애니메이션이 있다면 중지합니다.
+            if (animationId) cancelAnimationFrame(animationId);
+            particles = [];
+            // 화면을 깨끗하게 지웁니다.
+            ctx.clearRect(0, 0, fireworksCanvas.width, fireworksCanvas.height);
+            // 폭죽 여러 개를 동시에 터뜨리며 시작합니다.
+            createFirework(fireworksCanvas.width / 2, fireworksCanvas.height / 3);
+            createFirework(fireworksCanvas.width / 4, fireworksCanvas.height / 4);
+            createFirework(fireworksCanvas.width * 0.75, fireworksCanvas.height / 4);
+            
+            animateFireworks();
+        }
+    </script>
+</body>
+</html>
